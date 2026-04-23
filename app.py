@@ -53,8 +53,8 @@ if 'uploaded_filename' not in st.session_state:
 # -----------------------------------------------------------------------------
 col_title, col_time = st.columns([0.75, 0.25])
 with col_title:
-    st.title("🏦 Portfolio Manager v7.8")
-    st.markdown("##### ✨ 버그 픽스픽스픽스 (2/27 17:45)")
+    st.title("🏦 Portfolio Manager v8.0")
+    st.markdown("포트폴리오 Hedge 비율 확인기능 추가")
 with col_time:
     kst_timezone = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst_timezone)
@@ -225,7 +225,6 @@ def get_naver_stock_info(code):
 
 def get_current_price(ticker):
     ticker = str(ticker).strip().upper()
-    # [수정] 현금 자산은 무조건 가격을 1.0으로 고정하여 환율 이중 계산(제곱) 방지
     if ticker in ['KRW', 'USD']:
         return 1.0
         
@@ -254,7 +253,6 @@ def get_current_price(ticker):
 def get_stock_info_safe(input_str):
     ticker = resolve_ticker_naver(str(input_str))
     
-    # [수정] 현금 자산 검색 시 명시적인 결과 반환
     if ticker in ['KRW', 'USD']:
         return {
             '종목코드': ticker,
@@ -320,7 +318,6 @@ def color_profit(val):
     elif val < 0: return 'color: #00498c'
     return 'color: black'
 
-# [수정] 스마트 포맷팅: 사용자가 USD 매수단가를 환율(1300 등)로 적었을 때 혼동 방지
 def format_price_smart(val, ticker, curr):
     if pd.isna(val): return ""
     ticker = str(ticker).strip().upper()
@@ -357,7 +354,6 @@ def calculate_portfolio(df, usd_krw):
         if ticker == 'KRW':
             price, eval_val, buy_val, currency = 1.0, qty, qty * avg_price, 'KRW'
         elif ticker == 'USD':
-            # [핵심수정] 달러 본질 가격은 1.0으로 고정
             price = 1.0
             eval_val = qty * usd_krw
             buy_val = (qty * avg_price * usd_krw) if avg_price < 50 else (qty * avg_price)
@@ -423,7 +419,7 @@ if st.session_state['portfolio_data'] is None and st.session_state['raw_excel_da
         st.download_button(
             label="📄 표준 엑셀 양식 다운로드", 
             data=get_template_excel(), 
-            file_name='portfolio_template_v7.8.xlsx', 
+            file_name='portfolio_template_v8.0.xlsx', 
             use_container_width=True
         )
         st.download_button(
@@ -444,7 +440,7 @@ else:
         col_dl, col_up = st.columns([1, 1.5])
         with col_dl:
             st.markdown("**양식 및 가이드 다운로드**")
-            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v7.8.xlsx', use_container_width=True)
+            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v8.0.xlsx', use_container_width=True)
             st.download_button("📥 엑셀 작성 가이드 (PDF)", data=get_guide_pdf(), file_name='포트폴리오 매니저_엑셀작성가이드.pdf', mime='application/pdf', use_container_width=True)
         with col_up:
             st.markdown("**데이터 재업로드**")
@@ -541,7 +537,7 @@ if st.session_state['raw_excel_data'] is not None:
                 is_kr = (row['국가'] == '한국') or is_korean_stock(t)
                 
                 if t == 'KRW': hp, hb = 1.0, qty
-                elif t == 'USD': hp, hb = 1.0, qty * hist_ex_rate # [수정] 달러 본질 가격 1.0 반영
+                elif t == 'USD': hp, hb = 1.0, qty * hist_ex_rate 
                 else:
                     hp = get_hist_price(t, target_date, is_kr)
                     hb = hp * qty if is_kr else hp * qty * hist_ex_rate
@@ -579,7 +575,7 @@ if st.session_state['raw_excel_data'] is not None:
     all_df_dashboard = pd.concat(dashboard_dfs, ignore_index=True) if dashboard_dfs else pd.DataFrame() 
     all_df_raw = pd.concat(portfolio_dict.values(), ignore_index=True)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 통합 대시보드", "📂 계좌별 상세", "🎛️ 시뮬레이션", "📝 원본 데이터"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 통합 대시보드", "📂 계좌별 상세", "🎛️ 시뮬레이션", "📝 원본 데이터", "🛡️ 헷지 비율 분석"])
 
     # --- [TAB 1] 통합 대시보드 ---
     with tab1:
@@ -611,7 +607,6 @@ if st.session_state['raw_excel_data'] is not None:
             st.subheader("📋 전체 자산 상세")
             summary_cols = ['계좌명', '종목명', '업종', '국가', '수량', price_col_name, '현재가', '수익률', '평가금액']
             
-            # [포맷팅 개선] 달러/원화 자동 구별
             disp_dashboard_df = all_df_dashboard[summary_cols + ['통화', '종목코드']].copy()
             disp_dashboard_df[price_col_name] = disp_dashboard_df.apply(lambda r: format_price_smart(r[price_col_name], r['종목코드'], r['통화']), axis=1)
             disp_dashboard_df['현재가'] = disp_dashboard_df.apply(lambda r: format_price_smart(r['현재가'], r['종목코드'], r['통화']), axis=1)
@@ -744,7 +739,6 @@ if st.session_state['raw_excel_data'] is not None:
         sim_df['시뮬레이션 수량'] = edited.loc[valid_indices, '시뮬레이션 수량']
         st.session_state['sim_df'] = sim_df
         
-        # [핵심수정] 1.0으로 고정된 달러는 환율을 정상적으로 1번만 곱하게 됨 (제곱 방지)
         def calc_sim_total(row):
             p, q = row['현재가'], row['시뮬레이션 수량']
             return p * q * usd_krw if row['통화'] == 'USD' or row['국가'] == '미국' else p * q
@@ -802,3 +796,111 @@ if st.session_state['raw_excel_data'] is not None:
     # --- [TAB 4] 원본 데이터 ---
     with tab4:
         st.dataframe(all_df_raw)
+
+    # --- [TAB 5] 헷지 비율 분석 ---
+    with tab5:
+        st.header("🛡️ 포트폴리오 헷지(안전자산) 비율 분석")
+        st.markdown("포트폴리오 내 **위험자산(주식 등)**과 **안전자산(현금, 금, 채권, 달러 등)**의 비율을 확인하고 목표 비율에 도달하기 위한 필요 금액을 계산합니다.")
+        
+        if not all_df_dashboard.empty:
+            all_assets_list = all_df_dashboard['종목명'].unique().tolist()
+            
+            default_hedge_assets = []
+            hedge_keywords = ['현금', 'KRW', 'USD', '예수금', '달러', '금', 'GOLD', 'IAU', 'GLD', '채권', '국채', 'BOND', 'TLT']
+            for asset in all_assets_list:
+                if any(keyword in str(asset).upper() for keyword in hedge_keywords):
+                    default_hedge_assets.append(asset)
+            
+            st.markdown("#### 1. 헷지 자산 선택")
+            st.caption("프로그램이 자동으로 추론한 안전자산 목록입니다. 추가하거나 뺄 수 있습니다.")
+            selected_hedge_assets = st.multiselect(
+                "📌 안전자산 또는 부분 헷지로 분류할 종목을 모두 선택하세요:",
+                options=all_assets_list,
+                default=default_hedge_assets,
+                key="hedge_asset_selector"
+            )
+            
+            st.divider()
+            
+            # [신규 기능] 2. 개별 종목별 부분 헷지 비율 설정
+            st.markdown("#### 2. 개별 종목별 헷지 인정 비율 설정 (부분 헷지)")
+            st.caption("선택한 자산이 100% 헷지 역할을 하지 않는 경우(예: 지수추종 ETF), 인정 비율을 직접 조절할 수 있습니다. 건드리지 않으면 **기본 100%**로 합산됩니다.")
+            
+            hedge_ratios = {}
+            if selected_hedge_assets:
+                h_cols = st.columns(4)
+                for i, asset in enumerate(selected_hedge_assets):
+                    with h_cols[i % 4]:
+                        hedge_ratios[asset] = st.number_input(
+                            f"{asset} (%)", 
+                            min_value=0.0, 
+                            max_value=100.0, 
+                            value=100.0, 
+                            step=5.0, 
+                            key=f"hr_input_{asset}"
+                        )
+            else:
+                st.info("선택된 헷지 자산이 없습니다.")
+
+            st.divider()
+            
+            st.markdown("#### 3. 목표 헷지 비율 설정")
+            target_hedge_ratio = st.slider("🎯 포트폴리오 내 목표 헷지 비중 (%)", min_value=0, max_value=100, value=30, step=1, key="hedge_ratio_slider")
+            target_risk_ratio = 100 - target_hedge_ratio
+            
+            # [수정] 부분 헷지 비율(%)을 적용한 정밀 계산 로직
+            current_hedge_value = 0
+            current_risk_value = 0
+            total_eval_value = all_df_dashboard['평가금액'].sum()
+            
+            for _, row in all_df_dashboard.iterrows():
+                a_name = row['종목명']
+                a_val = row['평가금액']
+                
+                if a_name in selected_hedge_assets:
+                    # 사용자가 지정한 비율만큼 헷지로, 나머지는 위험자산으로 분배
+                    h_rat = hedge_ratios.get(a_name, 100.0) / 100.0
+                    current_hedge_value += a_val * h_rat
+                    current_risk_value += a_val * (1.0 - h_rat)
+                else:
+                    # 선택되지 않은 자산은 100% 위험 자산
+                    current_risk_value += a_val
+            
+            current_hedge_ratio = (current_hedge_value / total_eval_value * 100) if total_eval_value > 0 else 0
+            current_risk_ratio = (current_risk_value / total_eval_value * 100) if total_eval_value > 0 else 0
+            
+            target_hedge_value = total_eval_value * (target_hedge_ratio / 100)
+            target_risk_value = total_eval_value * (target_risk_ratio / 100)
+            
+            diff_hedge_value = target_hedge_value - current_hedge_value
+            
+            # 화면 출력
+            st.markdown("#### 4. 현재 자산 배분 상태")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("총 자산 평가액", f"{total_eval_value:,.0f} 원")
+            c2.metric("현재 헷지 자산 비중", f"{current_hedge_ratio:.1f} %", f"{current_hedge_ratio - target_hedge_ratio:+.1f}%p (목표대비)")
+            c3.metric("현재 위험 자산 비중", f"{current_risk_ratio:.1f} %", f"{current_risk_ratio - target_risk_ratio:+.1f}%p (목표대비)")
+            
+            st.divider()
+            
+            st.markdown("#### 💡 리밸런싱 가이드")
+            if diff_hedge_value > 0:
+                st.info(f"목표 헷지 비율({target_hedge_ratio}%)을 맞추려면 안전자산을 **약 {diff_hedge_value:,.0f}원 더 매수**해야 합니다.")
+            elif diff_hedge_value < 0:
+                st.warning(f"목표 헷지 비율({target_hedge_ratio}%)을 맞추려면 안전자산을 **약 {abs(diff_hedge_value):,.0f}원 매도**(또는 위험자산 매수)해야 합니다.")
+            else:
+                st.success("🎉 완벽합니다! 현재 목표 헷지 비율을 정확히 유지하고 있습니다.")
+                
+            # 비율 시각화 차트
+            chart_data = pd.DataFrame({
+                '자산 구분': ['위험 자산 (Risk)', '안전 자산 (Hedge)'],
+                '현재 평가액': [current_risk_value, current_hedge_value],
+                '비율': [current_risk_ratio, current_hedge_ratio]
+            })
+            
+            fig = px.pie(chart_data, values='현재 평가액', names='자산 구분', title="위험 자산 vs 헷지 자산 비중", hole=0.4, color='자산 구분', color_discrete_map={'안전 자산 (Hedge)':'#00b894', '위험 자산 (Risk)':'#d63031'})
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.info("데이터가 없습니다. 엑셀 파일을 먼저 업로드해주세요.")
