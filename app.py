@@ -53,8 +53,8 @@ if 'uploaded_filename' not in st.session_state:
 # -----------------------------------------------------------------------------
 col_title, col_time = st.columns([0.75, 0.25])
 with col_title:
-    st.title("🏦 Portfolio Manager v8.0")
-    st.markdown("포트폴리오 Hedge 비율 확인기능 추가")
+    st.title("🏦 Portfolio Manager v8.1")
+    st.markdown("##### ✨ 헷지자산 확인기능 오픈")
 with col_time:
     kst_timezone = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst_timezone)
@@ -419,7 +419,7 @@ if st.session_state['portfolio_data'] is None and st.session_state['raw_excel_da
         st.download_button(
             label="📄 표준 엑셀 양식 다운로드", 
             data=get_template_excel(), 
-            file_name='portfolio_template_v8.0.xlsx', 
+            file_name='portfolio_template_v8.1.xlsx', 
             use_container_width=True
         )
         st.download_button(
@@ -440,7 +440,7 @@ else:
         col_dl, col_up = st.columns([1, 1.5])
         with col_dl:
             st.markdown("**양식 및 가이드 다운로드**")
-            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v8.0.xlsx', use_container_width=True)
+            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v8.1.xlsx', use_container_width=True)
             st.download_button("📥 엑셀 작성 가이드 (PDF)", data=get_guide_pdf(), file_name='포트폴리오 매니저_엑셀작성가이드.pdf', mime='application/pdf', use_container_width=True)
         with col_up:
             st.markdown("**데이터 재업로드**")
@@ -803,67 +803,64 @@ if st.session_state['raw_excel_data'] is not None:
         st.markdown("포트폴리오 내 **위험자산(주식 등)**과 **안전자산(현금, 금, 채권, 달러 등)**의 비율을 확인하고 목표 비율에 도달하기 위한 필요 금액을 계산합니다.")
         
         if not all_df_dashboard.empty:
+            # 1. 초기 셋업 데이터 구성 (표 형식 데이터)
             all_assets_list = all_df_dashboard['종목명'].unique().tolist()
-            
-            default_hedge_assets = []
             hedge_keywords = ['현금', 'KRW', 'USD', '예수금', '달러', '금', 'GOLD', 'IAU', 'GLD', '채권', '국채', 'BOND', 'TLT']
-            for asset in all_assets_list:
-                if any(keyword in str(asset).upper() for keyword in hedge_keywords):
-                    default_hedge_assets.append(asset)
             
-            st.markdown("#### 1. 헷지 자산 선택")
-            st.caption("프로그램이 자동으로 추론한 안전자산 목록입니다. 추가하거나 뺄 수 있습니다.")
-            selected_hedge_assets = st.multiselect(
-                "📌 안전자산 또는 부분 헷지로 분류할 종목을 모두 선택하세요:",
-                options=all_assets_list,
-                default=default_hedge_assets,
-                key="hedge_asset_selector"
+            hedge_setup_data = []
+            for asset in all_assets_list:
+                is_hedge = any(keyword in str(asset).upper() for keyword in hedge_keywords)
+                hedge_setup_data.append({
+                    '헷지 자산 지정': is_hedge,
+                    '종목명': asset,
+                    '인정 비율 (%)': 100.0
+                })
+            hedge_setup_df = pd.DataFrame(hedge_setup_data)
+            
+            st.markdown("#### 1. 개별 종목별 헷지(안전자산) 설정")
+            st.caption("체크박스를 선택하여 안전자산으로 지정하고, 지수추종 ETF처럼 부분 헷지인 경우 비율(%)을 직접 기재하세요.")
+            
+            # [UI 개편] 표 형식으로 깔끔하게 설정 (Data Editor 활용)
+            edited_hedge_df = st.data_editor(
+                hedge_setup_df,
+                column_config={
+                    "헷지 자산 지정": st.column_config.CheckboxColumn("✅ 헷지 자산 지정", default=False),
+                    "종목명": st.column_config.TextColumn("종목명", disabled=True),
+                    "인정 비율 (%)": st.column_config.NumberColumn("인정 비율 (%)", min_value=0.0, max_value=100.0, step=5.0, format="%.1f")
+                },
+                use_container_width=True,
+                hide_index=True,
+                key="hedge_data_editor"
             )
             
             st.divider()
             
-            # [신규 기능] 2. 개별 종목별 부분 헷지 비율 설정
-            st.markdown("#### 2. 개별 종목별 헷지 인정 비율 설정 (부분 헷지)")
-            st.caption("선택한 자산이 100% 헷지 역할을 하지 않는 경우(예: 지수추종 ETF), 인정 비율을 직접 조절할 수 있습니다. 건드리지 않으면 **기본 100%**로 합산됩니다.")
-            
-            hedge_ratios = {}
-            if selected_hedge_assets:
-                h_cols = st.columns(4)
-                for i, asset in enumerate(selected_hedge_assets):
-                    with h_cols[i % 4]:
-                        hedge_ratios[asset] = st.number_input(
-                            f"{asset} (%)", 
-                            min_value=0.0, 
-                            max_value=100.0, 
-                            value=100.0, 
-                            step=5.0, 
-                            key=f"hr_input_{asset}"
-                        )
-            else:
-                st.info("선택된 헷지 자산이 없습니다.")
-
-            st.divider()
-            
-            st.markdown("#### 3. 목표 헷지 비율 설정")
-            target_hedge_ratio = st.slider("🎯 포트폴리오 내 목표 헷지 비중 (%)", min_value=0, max_value=100, value=30, step=1, key="hedge_ratio_slider")
+            # [UI 개편] 직접 숫자를 기재하는 방식으로 변경
+            st.markdown("#### 2. 목표 헷지 비율 설정")
+            target_hedge_ratio = st.number_input(
+                "🎯 포트폴리오 내 목표 헷지 비중 (%)을 입력하세요.", 
+                min_value=0, max_value=100, value=30, step=1, 
+                key="hedge_ratio_input"
+            )
             target_risk_ratio = 100 - target_hedge_ratio
             
-            # [수정] 부분 헷지 비율(%)을 적용한 정밀 계산 로직
+            # 3. 정밀 계산 로직
             current_hedge_value = 0
             current_risk_value = 0
             total_eval_value = all_df_dashboard['평가금액'].sum()
+            
+            hedge_settings = edited_hedge_df.set_index('종목명').to_dict('index')
             
             for _, row in all_df_dashboard.iterrows():
                 a_name = row['종목명']
                 a_val = row['평가금액']
                 
-                if a_name in selected_hedge_assets:
-                    # 사용자가 지정한 비율만큼 헷지로, 나머지는 위험자산으로 분배
-                    h_rat = hedge_ratios.get(a_name, 100.0) / 100.0
+                setting = hedge_settings.get(a_name, {'헷지 자산 지정': False, '인정 비율 (%)': 100.0})
+                if setting['헷지 자산 지정']:
+                    h_rat = setting['인정 비율 (%)'] / 100.0
                     current_hedge_value += a_val * h_rat
                     current_risk_value += a_val * (1.0 - h_rat)
                 else:
-                    # 선택되지 않은 자산은 100% 위험 자산
                     current_risk_value += a_val
             
             current_hedge_ratio = (current_hedge_value / total_eval_value * 100) if total_eval_value > 0 else 0
@@ -875,7 +872,7 @@ if st.session_state['raw_excel_data'] is not None:
             diff_hedge_value = target_hedge_value - current_hedge_value
             
             # 화면 출력
-            st.markdown("#### 4. 현재 자산 배분 상태")
+            st.markdown("#### 3. 현재 자산 배분 상태")
             c1, c2, c3 = st.columns(3)
             c1.metric("총 자산 평가액", f"{total_eval_value:,.0f} 원")
             c2.metric("현재 헷지 자산 비중", f"{current_hedge_ratio:.1f} %", f"{current_hedge_ratio - target_hedge_ratio:+.1f}%p (목표대비)")
@@ -891,15 +888,16 @@ if st.session_state['raw_excel_data'] is not None:
             else:
                 st.success("🎉 완벽합니다! 현재 목표 헷지 비율을 정확히 유지하고 있습니다.")
                 
-            # 비율 시각화 차트
+            # [UI 개편] 시각적으로 돋보이게 폰트 크기와 볼드 처리 강화
             chart_data = pd.DataFrame({
                 '자산 구분': ['위험 자산 (Risk)', '안전 자산 (Hedge)'],
                 '현재 평가액': [current_risk_value, current_hedge_value],
                 '비율': [current_risk_ratio, current_hedge_ratio]
             })
             
-            fig = px.pie(chart_data, values='현재 평가액', names='자산 구분', title="위험 자산 vs 헷지 자산 비중", hole=0.4, color='자산 구분', color_discrete_map={'안전 자산 (Hedge)':'#00b894', '위험 자산 (Risk)':'#d63031'})
-            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig = px.pie(chart_data, values='현재 평가액', names='자산 구분', title="<b>위험 자산 vs 헷지 자산 비중</b>", hole=0.45, color='자산 구분', color_discrete_map={'안전 자산 (Hedge)':'#00b894', '위험 자산 (Risk)':'#d63031'})
+            fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=16)
+            fig.update_layout(height=550, title_x=0.5, title_font_size=24)
             st.plotly_chart(fig, use_container_width=True)
 
         else:
