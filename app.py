@@ -53,8 +53,8 @@ if 'uploaded_filename' not in st.session_state:
 # -----------------------------------------------------------------------------
 col_title, col_time = st.columns([0.75, 0.25])
 with col_title:
-    st.title("🏦 Portfolio Manager v8.1")
-    st.markdown("##### ✨ 헷지자산 확인기능 오픈")
+    st.title("🏦 Portfolio Manager v8.2")
+    st.markdown("수익률 비교군 증설 (연간 수익)")
 with col_time:
     kst_timezone = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst_timezone)
@@ -419,7 +419,7 @@ if st.session_state['portfolio_data'] is None and st.session_state['raw_excel_da
         st.download_button(
             label="📄 표준 엑셀 양식 다운로드", 
             data=get_template_excel(), 
-            file_name='portfolio_template_v8.1.xlsx', 
+            file_name='portfolio_template_v8.2.xlsx', 
             use_container_width=True
         )
         st.download_button(
@@ -440,7 +440,7 @@ else:
         col_dl, col_up = st.columns([1, 1.5])
         with col_dl:
             st.markdown("**양식 및 가이드 다운로드**")
-            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v8.1.xlsx', use_container_width=True)
+            st.download_button("📄 표준 엑셀 양식 받기", data=get_template_excel(), file_name='portfolio_template_v8.2.xlsx', use_container_width=True)
             st.download_button("📥 엑셀 작성 가이드 (PDF)", data=get_guide_pdf(), file_name='포트폴리오 매니저_엑셀작성가이드.pdf', mime='application/pdf', use_container_width=True)
         with col_up:
             st.markdown("**데이터 재업로드**")
@@ -490,11 +490,12 @@ if st.session_state['raw_excel_data'] is not None:
     usd_krw = st.session_state['usd_krw']
 
     # ==========================================
-    # 사이드바: 수익률 비교 기준 설정
+    # 사이드바: 수익률 비교 기준 설정 (4개 옵션으로 확장!)
     # ==========================================
     with st.sidebar:
         st.header("📈 수익률 비교 기준")
-        compare_mode = st.radio("기준 선택", ["💰 납입원금 기준", "📊 매입원가 기준", "📅 특정기준일 기준"], index=0)
+        # [핵심 업데이트] 연간 현금흐름(YTD) 옵션 추가
+        compare_mode = st.radio("기준 선택", ["💰 납입원금 기준", "📊 매입원가 기준", "📅 특정기준일 기준", "💸 연간 현금흐름 (YTD)"], index=0)
         
         target_date = None
         if compare_mode == "📅 특정기준일 기준":
@@ -503,19 +504,36 @@ if st.session_state['raw_excel_data'] is not None:
             
         st.divider()
         
-        st.header("💰 계좌별 납입원금 설정")
-        if compare_mode != "💰 납입원금 기준":
-            st.warning("💡 '납입원금 기준'을 선택해야 총 수익률 계산에 아래 금액이 반영됩니다.")
-        else:
-            st.caption("엑셀에 '납입원금' 열을 추가하면 자동 입력됩니다.")
+        # [핵심 업데이트] YTD 선택 시 현금흐름 스마트 입력 폼 제공
+        cf_bases = {}
+        if compare_mode == "💸 연간 현금흐름 (YTD)":
+            st.header("💸 계좌별 현금흐름 설정")
+            st.caption("전년 말 잔고를 기준으로 올해의 입출금을 추적하여 왜곡 없는 '올해의 진짜 수익률'을 보여줍니다.")
+            st.warning("⚠️ 정확한 수익률을 위해 '①전년말 평가금액'을 꼭 입력해 주세요!")
             
-        updated_principals = {}
-        for sheet_name, df in portfolio_dict.items():
-            default_val = df['매수금액'].sum()
-            current_val = st.session_state['user_principals'].get(sheet_name, default_val)
-            val = st.number_input(f"{sheet_name}", min_value=0.0, value=float(current_val), step=10000.0, format="%.0f", key=f"input_{sheet_name}")
-            updated_principals[sheet_name] = val
-        st.session_state['user_principals'] = updated_principals
+            current_month = datetime.now().month
+            for sheet_name in portfolio_dict.keys():
+                with st.expander(f"⚙️ {sheet_name} 계좌", expanded=False):
+                    v0 = st.number_input("① 전년말 평가금액", value=0.0, step=1000000.0, format="%.0f", key=f"v0_{sheet_name}")
+                    mo_dep = st.number_input("② 월 정기 납입액", value=1500000.0, step=100000.0, format="%.0f", key=f"mo_{sheet_name}")
+                    cnt = st.number_input("③ 올해 납입 횟수", min_value=0, max_value=12, value=current_month, step=1, key=f"cnt_{sheet_name}")
+                    extra = st.number_input("④ 일시 변동액 (+추가 / -인출)", value=0.0, step=100000.0, format="%.0f", key=f"ex_{sheet_name}")
+                    # 투자원금 베이스 = 기초자산 + (월납입액 * 개월수) + 추가변동액
+                    cf_bases[sheet_name] = v0 + (mo_dep * cnt) + extra
+        else:
+            st.header("💰 계좌별 납입원금 설정")
+            if compare_mode != "💰 납입원금 기준":
+                st.warning("💡 '납입원금 기준'을 선택해야 총 수익률 계산에 아래 금액이 반영됩니다.")
+            else:
+                st.caption("엑셀에 '납입원금' 열을 추가하면 자동 입력됩니다.")
+                
+            updated_principals = {}
+            for sheet_name, df in portfolio_dict.items():
+                default_val = df['매수금액'].sum()
+                current_val = st.session_state['user_principals'].get(sheet_name, default_val)
+                val = st.number_input(f"{sheet_name}", min_value=0.0, value=float(current_val), step=10000.0, format="%.0f", key=f"input_{sheet_name}")
+                updated_principals[sheet_name] = val
+            st.session_state['user_principals'] = updated_principals
 
     # ==========================================
     # 모드별 데이터 재가공 로직
@@ -555,6 +573,13 @@ if st.session_state['raw_excel_data'] is not None:
             new_df['비교금액'] = new_df['매수금액']
             account_base_vals[sheet] = new_df['매수금액'].sum()
             
+        elif compare_mode == "💸 연간 현금흐름 (YTD)":
+            new_df[price_col_name] = new_df['매수단가'] # 개별종목 표시는 매수단가 유지
+            new_df['비교금액'] = new_df['매수금액']
+            # 계좌의 총 베이스 금액을 현금흐름 합계액으로 강제 덮어씌움
+            base_amt = cf_bases.get(sheet, 0.0)
+            account_base_vals[sheet] = base_amt if base_amt > 0 else new_df['매수금액'].sum()
+            
         else: # "💰 납입원금 기준"
             new_df[price_col_name] = new_df['매수단가']
             new_df['비교금액'] = new_df['매수금액']
@@ -586,9 +611,11 @@ if st.session_state['raw_excel_data'] is not None:
             profit = total_eval - total_base
             yield_rate = (profit / total_base * 100) if total_base > 0 else 0
             
+            # [수정] 옵션별 메트릭 라벨 동적 변경
             if compare_mode == "💰 납입원금 기준": base_label = "총 납입원금"
             elif compare_mode == "📊 매입원가 기준": base_label = "총 매입원가"
-            else: base_label = f"기준 평가액 ({target_date.strftime('%m/%d')})"
+            elif compare_mode == "📅 특정기준일 기준": base_label = f"기준 평가액 ({target_date.strftime('%m/%d')})"
+            else: base_label = "총 누적 현금흐름 (YTD)"
             
             m1, m2, m3 = st.columns(3)
             m1.metric(base_label, f"{total_base:,.0f} 원")
@@ -633,7 +660,8 @@ if st.session_state['raw_excel_data'] is not None:
         
         if compare_mode == "💰 납입원금 기준": base_label = "계좌 납입원금"
         elif compare_mode == "📊 매입원가 기준": base_label = "계좌 매입원가"
-        else: base_label = f"기준 평가액 ({target_date.strftime('%m/%d')})"
+        elif compare_mode == "📅 특정기준일 기준": base_label = f"기준 평가액 ({target_date.strftime('%m/%d')})"
+        else: base_label = "계좌 누적 현금흐름 (YTD)"
         
         m1, m2, m3 = st.columns(3)
         m1.metric(base_label, f"{sheet_base:,.0f} 원")
@@ -803,7 +831,6 @@ if st.session_state['raw_excel_data'] is not None:
         st.markdown("포트폴리오 내 **위험자산(주식 등)**과 **안전자산(현금, 금, 채권, 달러 등)**의 비율을 확인하고 목표 비율에 도달하기 위한 필요 금액을 계산합니다.")
         
         if not all_df_dashboard.empty:
-            # 1. 초기 셋업 데이터 구성 (표 형식 데이터)
             all_assets_list = all_df_dashboard['종목명'].unique().tolist()
             hedge_keywords = ['현금', 'KRW', 'USD', '예수금', '달러', '금', 'GOLD', 'IAU', 'GLD', '채권', '국채', 'BOND', 'TLT']
             
@@ -820,7 +847,6 @@ if st.session_state['raw_excel_data'] is not None:
             st.markdown("#### 1. 개별 종목별 헷지(안전자산) 설정")
             st.caption("체크박스를 선택하여 안전자산으로 지정하고, 지수추종 ETF처럼 부분 헷지인 경우 비율(%)을 직접 기재하세요.")
             
-            # [UI 개편] 표 형식으로 깔끔하게 설정 (Data Editor 활용)
             edited_hedge_df = st.data_editor(
                 hedge_setup_df,
                 column_config={
@@ -835,7 +861,6 @@ if st.session_state['raw_excel_data'] is not None:
             
             st.divider()
             
-            # [UI 개편] 직접 숫자를 기재하는 방식으로 변경
             st.markdown("#### 2. 목표 헷지 비율 설정")
             target_hedge_ratio = st.number_input(
                 "🎯 포트폴리오 내 목표 헷지 비중 (%)을 입력하세요.", 
@@ -844,7 +869,6 @@ if st.session_state['raw_excel_data'] is not None:
             )
             target_risk_ratio = 100 - target_hedge_ratio
             
-            # 3. 정밀 계산 로직
             current_hedge_value = 0
             current_risk_value = 0
             total_eval_value = all_df_dashboard['평가금액'].sum()
@@ -871,7 +895,6 @@ if st.session_state['raw_excel_data'] is not None:
             
             diff_hedge_value = target_hedge_value - current_hedge_value
             
-            # 화면 출력
             st.markdown("#### 3. 현재 자산 배분 상태")
             c1, c2, c3 = st.columns(3)
             c1.metric("총 자산 평가액", f"{total_eval_value:,.0f} 원")
@@ -888,7 +911,6 @@ if st.session_state['raw_excel_data'] is not None:
             else:
                 st.success("🎉 완벽합니다! 현재 목표 헷지 비율을 정확히 유지하고 있습니다.")
                 
-            # [UI 개편] 시각적으로 돋보이게 폰트 크기와 볼드 처리 강화
             chart_data = pd.DataFrame({
                 '자산 구분': ['위험 자산 (Risk)', '안전 자산 (Hedge)'],
                 '현재 평가액': [current_risk_value, current_hedge_value],
